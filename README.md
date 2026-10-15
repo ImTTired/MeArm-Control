@@ -1,160 +1,160 @@
-# 
 
-# \# MeArm Control
 
-# 
+\# MeArm Control
 
-# MeArm V3.0 robotic arm control project based on Arduino UNO.
 
-# 
 
-# \## Hardware
+MeArm V3.0 robotic arm control project based on Arduino UNO.
 
-# 
 
-# \- Arduino UNO
 
-# \- MeArm robotic arm
+\## Hardware
 
-# \- V3.0 dual-joystick expansion board
 
-# \- Four servo motors
 
-# \- External 5–6V servo power supply
+\- Arduino UNO
 
-# 
+\- MeArm robotic arm
 
-# \## Pin Mapping
+\- V3.0 dual-joystick expansion board
 
-# 
+\- Four servo motors
 
-# | Joint | Servo Pin | Joystick |
+\- External 5–6V servo power supply
 
-# |---|---|---|
 
-# | Base | D9 | A0 |
 
-# | Left | D8 | A1 |
+\## Pin Mapping
 
-# | Right | D7 | A3 |
 
-# | Claw | D6 | A2 |
 
-# 
+| Joint | Servo Pin | Joystick |
 
-# \## Implemented Features
+|---|---|---|
 
-# 
+| Base | D9 | A0 |
 
-# \- Independent control of four joints
+| Left | D8 | A1 |
 
-# \- Real-time dual-joystick control
+| Right | D7 | A3 |
 
-# \- Serial gripper commands (O/S)
+| Claw | D6 | A2 |
 
-# \- Speed adjustment (H/L)
 
-# \- Three-servo coordinated control (x/y/z)
 
-# \- Joystick/serial control mode switching
+\## Implemented Features
 
-# \- Joint angle limits
 
-# 
 
-# \## Serial Commands
+\- Independent control of four joints
 
-# 
+\- Real-time dual-joystick control
 
-# Baud rate: 9600
+\- Serial gripper commands (O/S)
 
-# 
+\- Speed adjustment (H/L)
 
-# | Command | Function |
+\- Three-servo coordinated control (x/y/z)
 
-# |---|---|
+\- Joystick/serial control mode switching
 
-# | O | Open gripper |
+\- Joint angle limits
 
-# | S | Close gripper |
 
-# | H | High-speed mode |
 
-# | L | Low-speed mode |
+\## Serial Commands
 
-# | J | Joystick mode |
 
-# | M | Serial mode |
 
-# | x90,y90,z90 | Set Base, Left and Right targets |
+Baud rate: 9600
 
-# 
 
-# For V1.2, set Serial Monitor line ending to Newline.
 
-# 
+| Command | Function |
 
-# \## Safety
+|---|---|
 
-# 
+| O | Open gripper |
 
-# The current version uses conservative test limits:
+| S | Close gripper |
 
-# 
+| H | High-speed mode |
 
-# \- Base: 85–95 degrees
+| L | Low-speed mode |
 
-# \- Left: 85–95 degrees
+| J | Joystick mode |
 
-# \- Right: 85–95 degrees
+| M | Serial mode |
 
-# \- Claw: 30–45 degrees
+| x90,y90,z90 | Set Base, Left and Right targets |
 
-# 
 
-# These limits are for initial hardware validation, not the complete working range.
 
-# 
+For V1.2, set Serial Monitor line ending to Newline.
 
-# Disconnect servo power before uploading new firmware. Verify mechanical clearance before restoring power.
 
-# 
 
-# \## Development Status
+\## Safety
 
-# 
 
-# \- \[x] Arduino environment setup
 
-# \- \[x] Joystick and button input tests
+The current version uses conservative test limits:
 
-# \- \[x] Individual servo movement tests
 
-# \- \[x] Joystick control
 
-# \- \[x] O/S/H/L serial communication
+\- Base: 85–95 degrees
 
-# \- \[x] Three-servo serial control
+\- Left: 85–95 degrees
 
-# \- \[ ] Full-range mechanical calibration
+\- Right: 85–95 degrees
 
-# \- \[ ] Automatic pick-and-place
+\- Claw: 30–45 degrees
 
-# \- \[ ] Motion recording and playback
 
-# \- \[ ] Forward/inverse kinematics
 
-# \- \[ ] Drawing trajectory control
+These limits are for initial hardware validation, not the complete working range.
 
-# 
 
-# \## Notes
 
-# 
+Disconnect servo power before uploading new firmware. Verify mechanical clearance before restoring power.
 
-# This repository contains a student robotics assessment project.
 
-# Development and testing are ongoing.
 
-# 
+\## Development Status
+
+
+
+\- \[x] Arduino environment setup
+
+\- \[x] Joystick and button input tests
+
+\- \[x] Individual servo movement tests
+
+\- \[x] Joystick control
+
+\- \[x] O/S/H/L serial communication
+
+\- \[x] Three-servo serial control
+
+\- \[ ] Full-range mechanical calibration
+
+\- \[ ] Automatic pick-and-place
+
+\- \[ ] Motion recording and playback
+
+\- \[ ] Forward/inverse kinematics
+
+\- \[ ] Drawing trajectory control
+
+
+
+\## Notes
+
+
+
+This repository contains a student robotics assessment project.
+
+Development and testing are ongoing.
+
+
 
