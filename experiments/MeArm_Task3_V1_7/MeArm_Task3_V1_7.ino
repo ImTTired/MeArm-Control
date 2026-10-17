@@ -1,5 +1,7 @@
-
+// MeArm Task 3 V1.7: V1.6 Fast + four-button remote (buttons 1 and 4)
+// CAUTION: B/C positions and C grip are proposed, not hardware-tested.
 #include <Arduino.h>
+#include <SoftwareSerial.h>
 #include <Servo.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +19,13 @@ const byte CLAW  = 3;
 
 Servo servos[N];
 
+// Remote UART: UNO D10 RX <- remote TX; D11 TX -> remote RX. Common GND.
+SoftwareSerial remoteSerial(10, 11);
+const unsigned long REMOTE_DEBOUNCE_MS = 250;
+unsigned long lastRemoteButtonTime = 0;
+char lastRemoteButton = 0;
+bool repeatA = false;
+
 const byte servoPins[N] = {9, 8, 7, 6};
 const byte joyPins[N]   = {A0, A1, A3, A2};
 
@@ -26,12 +35,12 @@ const int maxAngle[N] = {180, 160, 180, 100};
 const float initialPose[N] = {90, 90, 90, 30};
 
 const int CLAW_OPEN  = 30;
-const int CLAW_CLOSE = 84;
+const int CLAW_CLOSE = 94; // generic S command (A); B auto uses 100
 
 // ========= Motion Parameters =========
 
-// Peak commanded joint speed (deg/s) for ordinary movements
-float motionSpeed = 12.0f;
+// Largest moving joint's average speed, deg/s
+float motionSpeed = 15.0f;
 
 // Motion interpolation update interval
 const unsigned long UPDATE_MS = 20;
@@ -72,31 +81,45 @@ struct Pose {
   int claw;
 };
 
-// Keep the successfully tested V1.4 poses.
+// A: measured pickup angles; B/C: proposed station angles.
+// Verify all B/C poses EMPTY before gripping any object.
+// Layout: A at base 60, B at 90, C at 120 deg;
+// right-side destinations use base 100, 130, 160 deg.
 const Pose sequenceA[] = {
-  {60, 130, 86, 30},   // APPROACH
-  {60, 130, 43, 30},   // PICK
-  {60, 130, 43, 84},   // GRASP
-  {60, 130, 86, 84},   // LIFT
-  {100, 130, 86, 84},  // TRANSFER
-  {100, 130, 55, 84},  // PLACE
-  {100, 130, 55, 30},  // RELEASE
-  {100, 130, 86, 30},  // RETRACT
-  {90, 90, 90, 30}     // HOME
+  {60,130,86,30},   // APPROACH
+  {60,130,43,30},   // PICK
+  {60,130,43,94},   // GRASP: user-confirmed closing target
+  {60,130,86,94},   // LIFT
+  {100,130,86,94},  // TRANSFER
+  {100,130,55,94},  // PLACE
+  {100,130,55,30},  // RELEASE
+  {100,130,86,30},  // RETRACT
+  {90,90,90,30}     // HOME
 };
-
-// Independent peak commanded joint speed for every A sequence step
-const float autoStepSpeed[] = {
-  12.0f,  // APPROACH
-   8.0f,  // PICK
-   8.0f,  // GRASP
-   8.0f,  // LIFT
-  12.0f,  // TRANSFER
-   8.0f,  // PLACE
-   8.0f,  // RELEASE
-  12.0f,  // RETRACT
-  12.0f   // HOME
+const Pose sequenceB[] = {
+  {90,130,86,30},
+  {90,130,43,30},
+  {90,130,43,100},  // B gripper close
+  {90,130,86,100},
+  {130,130,86,100},
+  {130,130,55,100},
+  {130,130,55,30},
+  {130,130,86,30},
+  {90,90,90,30}
 };
+const Pose sequenceC[] = {
+  {120,130,86,30},
+  {120,130,43,30},
+  {120,130,43,94},  // C TEMPORARY: must validate suitable grip
+  {120,130,86,94},
+  {160,130,86,94},
+  {160,130,55,94},
+  {160,130,55,30},
+  {160,130,86,30},
+  {90,90,90,30}
+};
+const Pose *activeSequence = sequenceA;
+char activeObject = 'A';
 
 const char *stepNames[] = {
   "APPROACH",
@@ -109,6 +132,8 @@ const char *stepNames[] = {
   "RETRACT",
   "HOME"
 };
+
+const Pose HOME_POSE = {90, 90, 90, 30};
 
 const byte SEQUENCE_LENGTH =
     sizeof(sequenceA) / sizeof(sequenceA[0]);
@@ -205,10 +230,7 @@ void updateMotion() {
   }
 }
 
-bool startMotion(
-    const float next[N],
-    float peakSpeed = 0.0f
-) {
+bool startMotion(const float next[N]) {
   for (byte i = 0; i < N; i++) {
     if (!validAngle(i, next[i])) {
       Serial.println("ANGLE OUT OF RANGE");
@@ -245,12 +267,8 @@ bool startMotion(
     return true;
   }
 
-  float selectedSpeed =
-    (peakSpeed > 0.0f) ? peakSpeed : motionSpeed;
-
-  // Quintic smoothstep peak rate is 1.875 times its average rate.
   float durationSeconds =
-    1.875f * maxDistance / selectedSpeed;
+    maxDistance / motionSpeed;
 
   motionDuration =
     (unsigned long)(durationSeconds * 1000.0f);
@@ -265,7 +283,7 @@ bool startMotion(
   return true;
 }
 
-bool startPose(const Pose &p, float speed) {
+bool startPose(const Pose &p) {
   float next[N] = {
     (float)p.base,
     (float)p.left,
@@ -273,15 +291,32 @@ bool startPose(const Pose &p, float speed) {
     (float)p.claw
   };
 
-  return startMotion(next, speed);
+  return startMotion(next);
 }
 
 // ========= Auto Sequence =========
 
 void beginAutoStep() {
   if (autoStep >= SEQUENCE_LENGTH) {
+    if (repeatA && activeObject == 'A') {
+      // A cycle finished. Start the next cycle at the next HOME endpoint.
+      autoStep = 0;
+      waiting = false;
+      Serial.println("REMOTE LOOP A: NEXT CYCLE");
+      // No recursion: this branch starts exactly one new pose.
+      if (!startPose(activeSequence[autoStep])) {
+        repeatA = false;
+        mode = SERIAL_MODE;
+        Serial.println("REMOTE LOOP FAILED");
+      } else {
+        Serial.println("STEP 0: APPROACH");
+      }
+      return;
+    }
     mode = SERIAL_MODE;
-    Serial.println("AUTO A COMPLETE");
+    Serial.print("AUTO ");
+    Serial.print(activeObject);
+    Serial.println(" COMPLETE");
     printPose();
     return;
   }
@@ -291,10 +326,7 @@ void beginAutoStep() {
   Serial.print(": ");
   Serial.println(stepNames[autoStep]);
 
-  if (!startPose(
-          sequenceA[autoStep],
-          autoStepSpeed[autoStep]
-      )) {
+  if (!startPose(activeSequence[autoStep])) {
     mode = SERIAL_MODE;
     Serial.println("AUTO FAILED: INVALID POSE");
     return;
@@ -303,12 +335,19 @@ void beginAutoStep() {
   waiting = false;
 }
 
-void startAutoA() {
+void startAuto(char objectCode) {
+  if (objectCode == 'A') activeSequence = sequenceA;
+  else if (objectCode == 'B') activeSequence = sequenceB;
+  else if (objectCode == 'C') activeSequence = sequenceC;
+  else return;
+  activeObject = objectCode;
   mode = AUTO_MODE;
   autoStep = 0;
   waiting = false;
 
-  Serial.println("AUTO A START");
+  Serial.print("AUTO ");
+  Serial.print(activeObject);
+  Serial.println(" START");
 
   beginAutoStep();
 }
@@ -349,12 +388,70 @@ void stopAuto() {
 
   mode = SERIAL_MODE;
   waiting = false;
+  repeatA = false;
 
   Serial.println("STOPPED");
   printPose();
 }
 
-// ========= Joystick =========
+// ========= Remote Button Commands =========
+
+void remoteHome() {
+  repeatA = false;
+  // Interrupt the current commanded trajectory before scheduling HOME.
+  stopAuto();
+  if (startPose(HOME_POSE)) {
+    mode = SERIAL_MODE;
+    Serial.println("REMOTE 4: HOME TARGET SET");
+  }
+}
+
+void handleRemoteButton(char c) {
+  if (c < '1' || c > '4') return;
+  unsigned long now = millis();
+  if (c == lastRemoteButton &&
+      now - lastRemoteButtonTime < REMOTE_DEBOUNCE_MS) {
+    return;
+  }
+  lastRemoteButton = c;
+  lastRemoteButtonTime = now;
+
+  switch (c) {
+    case '1':
+      if (repeatA) {
+        // A second press cancels the ongoing cycle, not just future repeats.
+        stopAuto();
+        Serial.println("REMOTE 1: LOOP A OFF");
+      } else {
+        // If other actions are running, stop first.
+        if (moving || mode == AUTO_MODE) stopAuto();
+        repeatA = true;
+        Serial.println("REMOTE 1: LOOP A ON");
+        startAuto('A');
+      }
+      break;
+    case '2':
+      Serial.println("REMOTE 2: RECORD NOT IMPLEMENTED YET");
+      break;
+    case '3':
+      Serial.println("REMOTE 3: PLAYBACK NOT IMPLEMENTED YET");
+      break;
+    case '4':
+      remoteHome();
+      break;
+  }
+}
+
+void readRemote() {
+  // Remote firmware sends raw button characters 1/2/3/4.
+  // Newline is not required; CR/LF is ignored.
+  while (remoteSerial.available()) {
+    char c = (char)remoteSerial.read();
+    handleRemoteButton(c);
+  }
+}
+
+// ========= Joystick ========= 
 
 void updateJoystick() {
   if (mode != JOYSTICK_MODE) return;
@@ -460,17 +557,20 @@ void processCommand(char *cmd) {
       }
 
       case 'H':
-        motionSpeed = 16.0f;
-        Serial.println("PEAK SPEED: HIGH 16 deg/s");
+        motionSpeed = 25.0f;
+        Serial.println("SPEED: HIGH 25 deg/s");
         return;
 
       case 'L':
         motionSpeed = 8.0f;
-        Serial.println("PEAK SPEED: LOW 8 deg/s");
+        Serial.println("SPEED: LOW 8 deg/s");
         return;
 
       case 'A':
-        startAutoA();
+      case 'B':
+      case 'C':
+        repeatA = false;
+        startAuto(c);
         return;
     }
   }
@@ -536,6 +636,7 @@ void readSerial() {
 
 void setup() {
   Serial.begin(9600);
+  remoteSerial.begin(9600);
 
   for (byte i = 0; i < N; i++) {
     currentAngle[i] = initialPose[i];
@@ -546,14 +647,16 @@ void setup() {
     servos[i].attach(servoPins[i]);
   }
 
-  Serial.println("MeArm Control V1.5.1 Ready");
-  Serial.println("Commands: A ! P J M O S H L");
+  Serial.println("MeArm Task 3 V1.7 Ready (V1.6 Fast core)");
+  Serial.println("Remote 1: toggle LOOP A, 4: HOME; 2/3 pending");
+  Serial.println("Commands: A B C ! P J M O S H L");
   Serial.println("XYZ: x90,y90,z90");
 
   printPose();
 }
 
 void loop() {
+  readRemote();
   readSerial();
   updateMotion();
   updateJoystick();

@@ -1,215 +1,112 @@
-# MeArm Control
+# MeArm V3.0 控制组项目
 
-Arduino UNO-based control software for a MeArm V3.0 robotic arm, developed through joystick calibration, serial control, pose teaching, automatic pick-and-place, and synchronized motion planning.
+Arduino UNO + MeArm V3.0 四舵机机械臂；包含基础摇杆/串口控制、A/B/C 抓取、双 Arduino 四按键、五点轨迹示教及 V 形轨迹演示。
 
-**Current tested version:** `V1.5.1` · **Status:** Object A grasping verified; Objects B/C and dual-Arduino controller remain pending.
+> **说明**：每份 `.ino` 是独立烧录的程序，不应把多个带 `setup()` / `loop()` 的文件放在同一个草图目录。任务四运动学推导报告尚未整合。代码中已实现的功能与实物验收结果并不完全相同。
 
-## 1. Hardware and pin mapping
+## 硬件与接线
 
-- Arduino UNO with V3 dual-joystick expansion board
-- MeArm V3.0, four hobby servos, modified gripper
-- External regulated servo supply (with a shared ground where appropriate)
+| 关节 | 舵机 | 摇杆模拟输入 |
+|---|---|---|
+| Base（底座） | D9 | A0 |
+| Left（主臂） | D8 | A1 |
+| Right（前臂） | D7 | A3 |
+| Claw（夹爪） | D6 | A2 |
 
-| Joint | Servo pin | Joystick analog pin | Role |
-| --- | --- | --- | --- |
-| Base | D9 | A0 | Rotates the base horizontally |
-| Left | D8 | A1 | Moves the main arm |
-| Right | D7 | A3 | Raises/lowers the front arm |
-| Claw | D6 | A2 | Opens/closes the gripper |
+- 默认指令角度 `(90,90,90,30)`，顺序为 Base/Left/Right/Claw。
+- 软件角度范围：Base 0–180°，Left 45–160°，Right 0–180°，Claw 30–100°；单关节范围内不代表组合姿态必然无碰撞。
+- 第二块 Arduino 按键板：TX → 主控 UNO D10（SoftwareSerial RX），共地；主控 D11 是软件串口 TX。9600 波特率，按键发送 ASCII `1/2/3/4`。
+- 舵机建议独立稳压供电；首次测试新姿态先悬空、空载验证。
 
-**V1.5.1 configured joint-angle limits** (from the team's tested configuration): Base `0–180°`, Left `45–160°`, Right `0–180°`, Claw `30–100°`. The initial command pose is `(90, 90, 90, 30)`. These are software limits, not a guarantee that every combination is collision-free.
+## 代码版本与更新日志
 
-## 2. Project structure and program guide
+| 代码文件／版本 | 任务 | 功能与相较前版的变化 |
+|---|---|---|
+| V1.1（开发阶段） | 任务一 | 双摇杆四关节控制；`O/S` 夹爪开合，`H/L` 调速。 |
+| V1.2（开发阶段） | 任务一 | 新增 `x90,y90,z90` 三关节角度指令及 `J/M` 模式切换；**x/y/z 是舵机角度，不是空间坐标**。 |
+| V1.3（开发阶段） | 任务一 | 新增 `P` 输出四关节指令角度，用于姿态示教。 |
+| V1.4（开发阶段） | 任务二 | 新增 A 物体九步自动抓取：接近→下降→夹紧→抬升→转运→放置→松开→撤离→HOME。 |
+| V1.5（开发阶段） | 任务二 | 引入四关节同步的五次平滑插值 `10t³−15t⁴+6t⁵`。 |
+| `MeArm_Control_V1_5_1.ino` | 任务二 | 增加五次插值峰值速度限制，动作更保守。 |
+| `MeArm_Control_V1_6_Fast.ino` | 任务二 | 恢复较快的轨迹规划；扩展 A/B/C 三套抓取放置序列。 |
+| **`MeArm_Task2_V1_7_Quick.ino`** | **任务二最新版** | **A/B/C 快速抓取；默认规划速度 24°/s，高速 32°/s，低速 12°/s；动作间停顿缩短。** |
+| `MeArm_Task3_V1_7.ino` | 任务三 | 双 Arduino 四按键初版；1 循环 A 抓取，4 回 HOME；2/3 为早期占位。 |
+| `MeArm_Task3_V1_8.ino` | 任务三 | 新增动作录制/回放，但原版超出 UNO 2KB SRAM，**不推荐烧录**。 |
+| **`MeArm_Task3_V1_8_1.ino`** | **任务三推荐版** | **录制上限 140 帧、120ms/帧（约 16.8s）；使用 PROGMEM/F() 降低 SRAM 占用，编译内存问题已解决。** |
+| `MeArm_Task5_V2_0.ino` | 任务五 | 首次绘图标定：摇杆定位、`K` 记录、`D` 查看点位。 |
+| `MeArm_Task5_V2_1.ino` | 任务五 | 初版 W 五点关节轨迹，支持暂停/取消；启动需先 `E` 确认。 |
+| `MeArm_Task5_V2_2.ino` | 任务五 | 取消 `E` 前置条件，`T` 一键自动到 P1 并运行五点轨迹。 |
+| `MeArm_Task5_V2_3.ino` | 任务五 | 五点夹爪统一为任务二 B 的 100°。 |
+| `MeArm_Task5_V2_4.ino` | 任务五 | 放大 W 轨迹跨度并延长大幅度动作时间。 |
+| `MeArm_Task5_V2_5.ino` | 任务五 | 横向进一步加宽、左右重新分布，Base 从 80° 变化至 24°。 |
+| `MeArm_Task5_V2_6.ino` | 任务五 | 增加五点摇杆示教、折线回放、关节平滑曲线、双 Arduino 四按键。 |
+| **`MeArm_Task5_V2_7.ino`** | **任务五最新版** | **预设由 W 改为 V；`T` 一键执行；前往 P1 3.0s、每段 1.8s、平滑曲线每段 2.2s；保留 V2.6 全部交互功能。** |
 
-Each Arduino sketch should reside in a folder with the same name as its `.ino` file. Include the entries below **only if the corresponding files are actually present** in the repository.
+## 任务二：A/B/C 自动抓取（V1.7 Quick）
 
-| Sketch / phase | Purpose | Main difference from previous phase |
-| --- | --- | --- |
-| `Joystick_Test` (experiment) | Read analog joystick axes and button states over Serial | Verified joystick inputs and pin wiring |
-| `Servo_Test` (experiment) | Command one joint at a time | Verified servo pins, directions, and initial angles |
-| `MeArm_Control_V1_1` | Four-joint joystick control and gripper/speed serial commands | Added `O`, `S`, `H`, `L` and per-joint software limits |
-| `MeArm_Control_V1_2` | Coordinated serial joint positioning | Added `xNN,yNN,zNN`, joystick/serial modes `J` and `M` |
-| `MeArm_Control_V1_3` | Pose teaching / inspection | Added `P` to print four commanded joint angles; adopted tested working-angle configuration |
-| `MeArm_Control_V1_4` | Automated pick-and-place sequence for object A | Added `A` command, nine stored poses, auto-sequence state machine, and `!` stop |
-| `MeArm_Control_V1_5` | Synchronized, smooth multi-joint movement | Replaced fixed 1° stepping with time-based quintic interpolation; updates about every 20 ms |
-| **`MeArm_Control_V1_5_1`** | **Refined speed-limited automatic pick-and-place** | **Corrected quintic peak-speed calculation and introduced independent speed limits for each auto step** |
+程序：`MeArm_Task2_V1_7_Quick.ino`。输入 `A`、`B`、`C` 分别启动三套抓取序列；`P` 查看当前指令角度；`J/M` 切换摇杆/串口模式；`O/S` 控制夹爪；`H/L` 调速；`!` 软件停止；`x90,y90,z90` 发送 Base、Left、Right 的目标角度。
 
-The naming in this table reflects the development stages; the repository may also contain earlier experiments with different filenames.
+**V1.7 Quick 提速参数：** 默认 24°/s、高速 32°/s、低速 12°/s；单步最短 220ms、普通动作间等待 180ms、夹紧/松开等待 500ms。速度是轨迹规划值，不是实测舵机转速。
 
-## 3. Version history and implementation details
+夹爪闭合：A=94°，B=100°，C 暂设 94°。A 的关键抓取点来自实物示教；B/C 的位置与 C 的夹持可靠性仍需实测确认。新版提速后应复测物体是否滑落、连杆是否碰撞。
 
-### V1.1 — Joystick and basic serial commands
+## 任务三：双 Arduino 四按键（V1.8.1）
 
-- Control four joints independently using the dual joysticks.
-- Read single-character commands: `O` opens the gripper, `S` closes it, `H` selects higher speed and `L` lower speed.
-- Protect the mechanism with conservative software limits during initial testing.
-- Movement implemented as small, regularly timed changes to the servo's commanded angle.
+程序：`MeArm_Task3_V1_8_1.ino`。
 
-**Limitation:** The motion was not synchronized across joints, and speed changes were coarse.
+| 按键 ASCII | 功能 |
+|---|---|
+| `1` | 启动/停止 A 物体循环抓取 |
+| `2` | 开始/结束并保存摇杆动作录制 |
+| `3` | 播放/停止已录制动作 |
+| `4` | 返回 HOME |
 
-### V1.2 — Three-joint serial positioning
+动作录制最多 140 帧、每 120ms 采样，理论记录窗口约 16.8 秒。V1.8 原版内存超限，V1.8.1 通过压缩帧存储和常量移入 Flash 解决编译内存问题。**当前记录中，四按键基础功能曾通过实物测试；V1.8.1 的完整录制/回放仍未确认实物验收。**
 
-- Added `x90,y90,z90`-style serial commands (the values specify **Base, Left, Right** in degrees).
-- Added `J` (joystick mode) and `M` (serial mode) to avoid competing inputs.
-- Retained existing joystick and single-character serial functions.
+## 任务五：V 形轨迹与五点示教（V2.7）
 
-**Limitation:** Joint movement still used fixed-size angular steps; a short-travel joint could finish much earlier than a long-travel joint.
+程序：`MeArm_Task5_V2_7.ino`。五个预设关节姿态（Base/Left/Right/Claw，单位 °）：
 
-### V1.3 — Pose teaching
+| 点 | Base | Left | Right | Claw |
+|---|---:|---:|---:|---:|
+| P1 | 80 | 122 | 33 | 100 |
+| P2 | 66 | 131 | 44 | 100 |
+| P3（V 底部） | 52 | 140 | 54 | 100 |
+| P4 | 38 | 131 | 44 | 100 |
+| P5 | 24 | 122 | 33 | 100 |
 
-- Added `P`: print the four **commanded** joint angles in `Base,Left,Right,Claw` order.
-- Used the output to record reproducible pickup poses instead of guessing angles.
-- Expanded the earlier narrow test limits to the team's tested configuration.
+| 串口指令 | 功能 |
+|---|---|
+| `T` | 一键前往 P1 并依次经过 P2～P5（预设 V） |
+| `J` / `M` | 摇杆开启/关闭 |
+| `K` | 保存一个示教点（最多五个） |
+| `D` | 查看预设点和示教点 |
+| `X` | 清空示教点 |
+| `R` | 回放五个示教点的关节折线轨迹 |
+| `G` | 通过五点生成 Catmull–Rom **关节空间**平滑曲线 |
+| `U` | 暂停/继续 |
+| `C` | 取消运行并保持当前指令姿态 |
+| `P` | 输出当前指令角度 |
 
-**Note:** `P` reports software-commanded positions, not encoder measurements of the actual shaft angles.
+任务五第二 Arduino 按键：`1` 启动预设 V / 运行中取消；`2` 记录一个点；`3` 回放五点；`4` 暂停/继续。预设 V 总规划时长约 **10.2 秒**（3.0 + 4×1.8 秒），不含暂停。
 
-### V1.4 — Object A automatic pickup and placement
+**重要技术限制：** V2.7 采用关节角度插值，`G` 也只在关节空间做 Catmull–Rom 插值。它们**不能保证铅笔尖在 A4 纸上走严格直线、等高折线或真正的纸面平滑曲线**。改装铅笔夹具的工具偏移、纸面高度和逆运动学尚未完成标定；此前实测观察到明显的笔尖高度变化，也没有独立自动抬笔机构。第一次运行新轨迹应先悬空验证，不能以程序正常结束代替实际绘图验收。
 
-- Added `A` to run a stored sequence: **APPROACH → PICK → GRASP → LIFT → TRANSFER → PLACE → RELEASE → RETRACT → HOME**.
-- Added a non-blocking automatic step controller with pauses at each pose.
-- Added `!` as a software stop command; maintained serial and joystick control.
-- Object A's approach, pickup and grip poses were taught on the real mechanism; transfer and placement poses were subsequently tested as part of the A sequence.
+## 当前验证状态
 
-**Limitation:** Fixed `1°` changes at a common interval meant joints traveled at the same nominal rate, regardless of the distances each joint needed to move. Different joints therefore stopped at different times; starting and stopping could look jerky.
+- 基础摇杆、串口、舵机引脚映射：已进行实物测试。
+- 任务二 A：关键姿态经过实物示教；V1.7 Quick 提速版仍需复测。
+- 任务二 B/C：使用候选抓取姿态，需根据实际物体确认。
+- 任务三 V1.7 四按键：基础控制测试通过；V1.8.1 录制/回放待验证。
+- 任务五 V2.6 `T`：已反馈完成五点自动轨迹；V2.7 快速 V 与纸面画图效果仍需确认。
+- 任务四运动学推导：未在本次代码更新中完成。
 
-### V1.5 — Synchronized quintic trajectory planning
+## 使用与提交
 
-- Replaced fixed 1° stepping with a **time-based, four-joint interpolated motion**.
-- All joints in one move use the same normalized time `t`, so their *commanded trajectories* start and finish together.
-- Applied quintic smoothstep interpolation: `s(t) = 10t³ − 15t⁴ + 6t⁵`.
-- Updated servo target pulses approximately every `20 ms`; used fractional-degree internal positions.
-- Introduced a single global `motionSpeed = 15.0f`, interpreted by the code as the average speed (°/s) of the joint with the largest movement.
+1. 每份 `.ino` 放进与文件同名的文件夹，例如 `MeArm_Task5_V2_7/MeArm_Task5_V2_7.ino`。
+2. Arduino IDE 选择 **Arduino UNO**、正确 COM 端口；串口监视器 **9600 baud**。
+3. 上传对应任务的**单独程序**，接好独立舵机电源与共地线路。
+4. 新的运动轨迹先空载、笔尖悬空测试，再进行纸面或带物体测试。
+5. 将演示视频和实测结果追加到仓库，明确标注通过的功能与仍待调试的项目。
 
-**Remaining issue:** Even with a smooth velocity curve, the midpoint velocity is substantially higher than the average. The pickup-to-lift motion visibly accelerated too much.
-
-### V1.5.1 — Corrected peak velocity and step-dependent speeds
-
-**This version is a targeted update to the tested V1.5 implementation, not a rewrite of the motion engine.** It retains the same servo/joystick pin mappings, A sequence poses, quintic interpolation, and existing serial commands.
-
-#### A. Correct interpretation of speed
-
-The quintic function's **maximum derivative is 1.875**. V1.5 computed the segment duration as:
-
-```cpp
-float durationSeconds = maxDistance / motionSpeed;
-```
-
-As a result, a `15°/s` *average* commanded joint speed could reach a **28.125°/s peak** during the segment.
-
-V1.5.1 instead treats `motionSpeed` as the allowable **peak commanded joint speed**, with the duration calculated as:
-
-```cpp
-float selectedSpeed =
-    (peakSpeed > 0.0f) ? peakSpeed : motionSpeed;
-float durationSeconds =
-    1.875f * maxDistance / selectedSpeed;
-```
-
-The default peak speed was changed from the former `15°/s` average-speed setting to a `12°/s` peak-speed setting. Manual/serial `H` now sets `16°/s`, while `L` sets `8°/s`.
-
-#### B. Different limits for different actions
-
-V1.5.1 adds a nine-element `autoStepSpeed[]` table aligned with `sequenceA[]`:
-
-| Action | Peak command speed (°/s) |
-| --- | ---: |
-| APPROACH | 12 |
-| PICK | 8 |
-| GRASP | 8 |
-| **LIFT** | **8** |
-| TRANSFER | 12 |
-| PLACE | 8 |
-| RELEASE | 8 |
-| RETRACT | 12 |
-| HOME | 12 |
-
-The automatic sequence passes the speed for each step into `startPose()` → `startMotion()`. Ordinary joystick, `O/S`, and `x/y/z` commands still use the global `motionSpeed`, so the previous interfaces are preserved. **`H/L` affect ordinary/manual/serial movements, not the independently configured automatic A step speeds.**
-
-#### C. Worked example — Why the lift became smoother
-
-The **GRASP → LIFT** transition changes the Right joint from `43°` to `86°`, a **43° movement**:
-
-| Configuration | Planned segment duration | Planned peak commanded speed |
-| --- | ---: | ---: |
-| V1.5 (`15°/s` average) | ~2.87 s | ~28.13°/s |
-| V1.5.1 default (`12°/s` peak) | ~6.72 s | 12°/s |
-| **V1.5.1 LIFT step (`8°/s` peak)** | **~10.08 s** | **8°/s** |
-
-These are **software trajectory calculations**, not measured servo velocities. The smoother motion of V1.5.1 was confirmed by a real-world run of the arm.
-
-#### D. What did *not* change
-
-- Hardware mapping, working-angle configuration and initial pose
-- Existing object A pose sequence and automatic step order
-- Smoothstep polynomial and synchronized interpolation
-- `A`, `!`, `P`, `J`, `M`, `O`, `S`, `H`, `L`, and `x/y/z` command interfaces
-
-## 4. Serial command reference (V1.5.1)
-
-Use **9600 baud** and **Newline** as the Serial Monitor line ending.
-
-| Command | Description |
-| --- | --- |
-| `J` | Joystick mode |
-| `M` | Serial positioning mode |
-| `P` | Print commanded pose (`Base,Left,Right,Claw`) |
-| `O` | Open gripper (`30°` target) |
-| `S` | Close gripper (`84°` target) |
-| `H` | Set ordinary-motion peak command speed to `16°/s` |
-| `L` | Set ordinary-motion peak command speed to `8°/s` |
-| `x90,y90,z90` | Command Base, Left and Right angles; claw target is not changed |
-| `A` | Run automatic object A sequence |
-| `!` | Stop updating the active planned motion (software stop; not a hardware emergency stop) |
-
-The `A` sequence uses its own per-step speed table, independent of the currently selected `H/L` speed. The configured angles describe servo setpoints, not real-time measured positions.
-
-## 5. Object A: taught trajectory
-
-The active V1.5.1 sequence stores joint poses in the order `Base,Left,Right,Claw`:
-
-| Step | Base | Left | Right | Claw |
-| --- | ---: | ---: | ---: | ---: |
-| APPROACH | 60 | 130 | 86 | 30 |
-| PICK | 60 | 130 | 43 | 30 |
-| GRASP | 60 | 130 | 43 | 84 |
-| LIFT | 60 | 130 | 86 | 84 |
-| TRANSFER | 100 | 130 | 86 | 84 |
-| PLACE | 100 | 130 | 55 | 84 |
-| RELEASE | 100 | 130 | 55 | 30 |
-| RETRACT | 100 | 130 | 86 | 30 |
-| HOME | 90 | 90 | 90 | 30 |
-
-These poses are specific to the assembled arm and the marked work area; moving the robot base, changing the assembly, or reconnecting servos incorrectly can invalidate the taught trajectory.
-
-## 6. Verification and current status
-
-| Feature | Status |
-| --- | --- |
-| Four-servo joystick control | Tested |
-| O/S/H/L serial operation | Tested in earlier versions |
-| Three-joint serial positioning | Tested |
-| `P` pose output | Tested |
-| Object A grasping | **Successfully demonstrated on hardware** |
-| V1.5.1 smooth lift behavior | **Improved and observed to be smooth on hardware** |
-| Object B / C automatic sequences | Not yet implemented or verified |
-| Task 3: dual-Arduino buttons, recording and playback | Not yet implemented |
-
-## 7. Running and safety
-
-1. Open a sketch in Arduino IDE, select **Arduino Uno** (`arduino:avr:uno`) and the connected COM port.
-2. Compile and upload with the independent servo power supply disconnected.
-3. Recheck D6–D9 signal connections, correct signal/power/ground orientation, the common ground, and safe mechanical startup posture before applying servo power.
-4. Use Serial Monitor at **9600 baud**, **Newline**. Verify small movements first; perform an unloaded A sequence before grasping a real object after wiring or mechanical changes.
-5. Keep an accessible way to disconnect servo power. The `!` command is a **software motion stop**, not a substitute for a physical emergency power cutoff.
-
-## 8. Planned development
-
-- [x] Task 1: manual, joystick, and serial control
-- [x] Task 2: automatic grasp of object A
-- [x] Task 2: synchronized motion and speed optimization
-- [ ] Task 2: object B and C automatic pick-and-place demonstrations
-- [ ] Task 3: second Arduino + four-button wired control
-- [ ] Task 3: repeated pick, motion recording, playback, HOME
-- [ ] Subsequent kinematics and trajectory-drawing tasks
-
-> **Development note:** Old versions are preserved for reproducibility. Actual Git commits record when the files are committed; individual filenames describe development stages rather than implying separate historic commits.
+**安全提示：** 串口 `C` / `!` 是软件中止，不是物理断电急停；异常卡滞时应及时切断舵机供电。
